@@ -1,4 +1,4 @@
-# go-sdp
+# go-traceroute
 
 Go implementation of traceroute.
 
