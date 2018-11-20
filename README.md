@@ -39,8 +39,8 @@ func main() {
             Network: "ip4:ip",
         },
     }
-    ip := net.ParseIP("8.8.8.8")
-    err := t.Trace(context.Background(), ip, func(reply *traceroute.Reply) {
+    defer t.Close()
+    err := t.Trace(context.Background(), net.ParseIP("8.8.8.8"), func(reply *traceroute.Reply) {
         log.Printf("%d. %v %v", reply.Hops, reply.IP, reply.RTT)
     })
     if err != nil {
