@@ -30,7 +30,7 @@ import (
 )
 
 func main() {
-	t := &traceroute.Tracer{
+    t := &traceroute.Tracer{
         Config: traceroute.Config{
             Delay:   50 * time.Millisecond,
             Timeout: time.Second,
@@ -38,9 +38,9 @@ func main() {
             Count:   3,
             Network: "ip4:ip",
         },
-     }
-	ip := net.ParseIP("8.8.8.8")
-    err := t.Trace(context.Background(), ip, func(reply *traceroute.Reply) {
+    }
+    ip := net.ParseIP("8.8.8.8")
+        err := t.Trace(context.Background(), ip, func(reply *traceroute.Reply) {
         log.Printf("%d. %v %v", reply.Hops, reply.IP, reply.RTT)
     })
     if err != nil {
