@@ -40,7 +40,7 @@ func main() {
         },
     }
     ip := net.ParseIP("8.8.8.8")
-        err := t.Trace(context.Background(), ip, func(reply *traceroute.Reply) {
+    err := t.Trace(context.Background(), ip, func(reply *traceroute.Reply) {
         log.Printf("%d. %v %v", reply.Hops, reply.IP, reply.RTT)
     })
     if err != nil {
