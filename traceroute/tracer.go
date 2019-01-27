@@ -7,6 +7,7 @@ import (
 	"golang.org/x/net/ipv4"
 	"golang.org/x/net/ipv6"
 	"net"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -19,7 +20,7 @@ var DefaultConfig = Config{
 	Timeout: 2 * time.Second,
 	MaxHops: 30,
 	Count:   3,
-	Network: "ip4:ip",
+	Network: "ip4:icmp",
 }
 
 // DefaultTracer is a tracer with DefaultConfig.
@@ -383,7 +384,7 @@ func (h *Hop) Add(r *Reply) *Node {
 // Trace is a simple traceroute tool using DefaultTracer.
 func Trace(ip net.IP) ([]*Hop, error) {
 	hops := make([]*Hop, 0, DefaultTracer.MaxHops)
-	hop := func(dist int) *Hop {
+	touch := func(dist int) *Hop {
 		for _, h := range hops {
 			if h.Distance == dist {
 				return h
@@ -394,11 +395,14 @@ func Trace(ip net.IP) ([]*Hop, error) {
 		return h
 	}
 	err := DefaultTracer.Trace(context.Background(), ip, func(r *Reply) {
-		hop(r.Hops).Add(r)
+		touch(r.Hops).Add(r)
 	})
 	if err != nil && err != context.DeadlineExceeded {
 		return nil, err
 	}
+	sort.Slice(hops, func(i, j int) bool {
+		return hops[i].Distance < hops[j].Distance
+	})
 	last := len(hops) - 1
 	for i := last; i >= 0; i-- {
 		h := hops[i]
@@ -408,10 +412,13 @@ func Trace(ip net.IP) ([]*Hop, error) {
 		if i == last {
 			break
 		}
-		node := hops[i+1].Nodes[0]
-		for _, it := range hops[i+2:] {
+		i++
+		node := hops[i].Nodes[0]
+		i++
+		for _, it := range hops[i:] {
 			node.RTT = append(node.RTT, it.Nodes[0].RTT...)
 		}
+		hops = hops[:i]
 		break
 	}
 	return hops, nil

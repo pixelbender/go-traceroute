@@ -31,7 +31,7 @@ import (
 )
 
 func main() {
-    hops, err := traceroute.Trace(net.ParseIP("8.8.8.8"))
+    hops, err := traceroute.Trace(net.ParseIP("1.1.1.1"))
     if err != nil {
         log.Fatal(err)
     }
@@ -67,7 +67,7 @@ func main() {
         },
     }
     defer t.Close()
-    err := t.Trace(context.Background(), net.ParseIP("8.8.8.8"), func(reply *traceroute.Reply) {
+    err := t.Trace(context.Background(), net.ParseIP("1.1.1.1"), func(reply *traceroute.Reply) {
         log.Printf("%d. %v %v", reply.Hops, reply.IP, reply.RTT)
     })
     if err != nil {

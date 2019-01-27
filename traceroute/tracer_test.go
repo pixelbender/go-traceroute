@@ -10,7 +10,7 @@ import (
 )
 
 func TestTraceReply(t *testing.T) {
-	ip := net.ParseIP("8.8.8.8")
+	ip := net.ParseIP("1.1.1.1")
 	err := traceroute.DefaultTracer.Trace(context.Background(), ip, func(reply *traceroute.Reply) {
 		t.Logf("%d. %v %v", reply.Hops, reply.IP, reply.RTT)
 	})
@@ -20,7 +20,7 @@ func TestTraceReply(t *testing.T) {
 }
 
 func TestTrace(t *testing.T) {
-	ip := net.ParseIP("8.8.8.8")
+	ip := net.ParseIP("1.1.1.1")
 	hops, err := traceroute.Trace(ip)
 	if err != nil {
 		t.Fatal(err)
@@ -33,7 +33,7 @@ func TestTrace(t *testing.T) {
 }
 
 func ExampleSimple() {
-	hops, err := traceroute.Trace(net.ParseIP("8.8.8.8"))
+	hops, err := traceroute.Trace(net.ParseIP("1.1.1.1"))
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -55,7 +55,7 @@ func ExampleCustom() {
 		},
 	}
 	defer t.Close()
-	err := t.Trace(context.Background(), net.ParseIP("8.8.8.8"), func(reply *traceroute.Reply) {
+	err := t.Trace(context.Background(), net.ParseIP("1.1.1.1"), func(reply *traceroute.Reply) {
 		log.Printf("%d. %v %v", reply.Hops, reply.IP, reply.RTT)
 	})
 	if err != nil {
