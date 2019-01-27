@@ -22,11 +22,7 @@ package main
 
 import (
 	"github.com/pixelbender/go-traceroute/traceroute"
-	"context"
 	"log"
-	"net"
-	"time"
-	"fmt"
 )
 
 func main() {
@@ -53,7 +49,6 @@ import (
 	"log"
 	"net"
 	"time"
-	"fmt"
 )
 
 func main() {
