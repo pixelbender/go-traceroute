@@ -8,6 +8,7 @@ Go implementation of traceroute.
 - [x] IPv4 ID and IPv6 FlowLabel tracking
 - [ ] ICMPv6 support
 - [ ] UDP/TCP support
+- [ ] Remove golang.org/x/net
 
 ## Installation
 
