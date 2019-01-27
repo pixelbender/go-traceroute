@@ -2,6 +2,10 @@
 
 Go implementation of traceroute.
 
+[![Build Status](https://api.travis-ci.org/pixelbender/go-traceroute.svg)](https://travis-ci.org/pixelbender/go-traceroute)
+[![Go Report Card](https://goreportcard.com/badge/github.com/pixelbender/go-traceroute)](https://goreportcard.com/report/github.com/pixelbender/go-traceroute)
+[![GoDoc](https://godoc.org/github.com/pixelbender/go-traceroute?status.svg)](https://godoc.org/github.com/pixelbender/go-traceroute/traceroute)
+
 ## Features
 
 - [x] Reusable and Concurrent raw IP socket (needs root)

@@ -1,0 +1,6 @@
+language: go
+sudo: true
+go:
+  - tip
+script:
+  - go test -v ./...
