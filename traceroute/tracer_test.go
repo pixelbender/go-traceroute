@@ -22,5 +22,9 @@ func TestTrace(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Log(hops)
+	for _, h := range hops {
+		for _, n := range h.Nodes {
+			t.Logf("%d. %v %v", h.Distance, n.IP, n.RTT)
+		}
+	}
 }

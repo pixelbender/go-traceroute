@@ -13,16 +13,21 @@ import (
 	"time"
 )
 
-var DefaultTracer = &Tracer{
-	Config: Config{
-		Delay:   50 * time.Millisecond,
-		Timeout: time.Second,
-		MaxHops: 30,
-		Count:   3,
-		Network: "ip4:ip",
-	},
+// DefaultConfig is the default configuration for Tracer.
+var DefaultConfig = Config{
+	Delay:   50 * time.Millisecond,
+	Timeout: 2 * time.Second,
+	MaxHops: 30,
+	Count:   3,
+	Network: "ip4:ip",
 }
 
+// DefaultTracer is a tracer with DefaultConfig.
+var DefaultTracer = &Tracer{
+	Config: DefaultConfig,
+}
+
+// Config is a configuration for Tracer.
 type Config struct {
 	Delay   time.Duration
 	Timeout time.Duration
@@ -32,6 +37,8 @@ type Config struct {
 	Addr    *net.IPAddr
 }
 
+// Tracer is a traceroute tool based on raw IP packets.
+// It can handle multiple sessions simultaneously.
 type Tracer struct {
 	Config
 
@@ -44,6 +51,8 @@ type Tracer struct {
 	seq  uint32
 }
 
+// Trace starts sending IP packets to ip with TTL = 1, 2, ..., MaxHops and calls h for each reply.
+// It can be called concurrently.
 func (t *Tracer) Trace(ctx context.Context, ip net.IP, h func(reply *Reply)) error {
 	t.once.Do(t.init)
 	if t.err != nil {
@@ -127,7 +136,7 @@ func (t *Tracer) listen(network string, laddr *net.IPAddr) (*net.IPConn, error) 
 		conn.Close()
 		return nil, err
 	}
-	raw.Control(func(fd uintptr) {
+	_ = raw.Control(func(fd uintptr) {
 		err = syscall.SetsockoptInt(int(fd), syscall.IPPROTO_IP, syscall.IP_HDRINCL, 1)
 	})
 	if err != nil {
@@ -137,6 +146,8 @@ func (t *Tracer) listen(network string, laddr *net.IPAddr) (*net.IPConn, error) 
 	return conn, nil
 }
 
+// Close closes listening socket.
+// Tracer can not be used after Close is called.
 func (t *Tracer) Close() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -299,6 +310,7 @@ var (
 )
 
 func newPacket(id uint16, dst net.IP, ttl int) []byte {
+	// TODO: reuse buffers...
 	msg := icmp.Message{
 		Type: ipv4.ICMPTypeEcho,
 		Body: &icmp.Echo{
@@ -332,23 +344,27 @@ const (
 	ProtocolIPv6ICMP = 58
 )
 
+// Reply is a reply packet.
 type Reply struct {
 	IP   net.IP
 	RTT  time.Duration
 	Hops int
 }
 
+// Node is a detected network node.
 type Node struct {
-	IP   net.IP
-	RTTs []time.Duration
+	IP  net.IP
+	RTT []time.Duration
 }
 
+// Hop is a set of detected nodes.
 type Hop struct {
 	Nodes    []*Node
 	Distance int
 }
 
-func (h *Hop) Add(r *Reply) {
+// Add adds node from r.
+func (h *Hop) Add(r *Reply) *Node {
 	var node *Node
 	for _, it := range h.Nodes {
 		if it.IP.Equal(r.IP) {
@@ -360,9 +376,11 @@ func (h *Hop) Add(r *Reply) {
 		node = &Node{IP: r.IP}
 		h.Nodes = append(h.Nodes, node)
 	}
-	node.RTTs = append(node.RTTs, r.RTT)
+	node.RTT = append(node.RTT, r.RTT)
+	return node
 }
 
+// Trace is a simple traceroute tool using DefaultTracer.
 func Trace(ip net.IP) ([]*Hop, error) {
 	hops := make([]*Hop, 0, DefaultTracer.MaxHops)
 	hop := func(dist int) *Hop {
@@ -380,6 +398,21 @@ func Trace(ip net.IP) ([]*Hop, error) {
 	})
 	if err != nil && err != context.DeadlineExceeded {
 		return nil, err
+	}
+	last := len(hops) - 1
+	for i := last; i >= 0; i-- {
+		h := hops[i]
+		if len(h.Nodes) == 1 && ip.Equal(h.Nodes[0].IP) {
+			continue
+		}
+		if i == last {
+			break
+		}
+		node := hops[i+1].Nodes[0]
+		for _, it := range hops[i+2:] {
+			node.RTT = append(node.RTT, it.Nodes[0].RTT...)
+		}
+		break
 	}
 	return hops, nil
 }

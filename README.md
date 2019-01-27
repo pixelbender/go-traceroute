@@ -6,7 +6,7 @@ Go implementation of traceroute.
 
 - [x] Reusable and Concurrent raw IP socket (needs root)
 - [x] IPv4 ID and IPv6 FlowLabel tracking
-- [ ] IPv6 + ICMP support
+- [ ] ICMPv6 support
 - [ ] UDP/TCP support
 
 ## Installation
@@ -15,7 +15,34 @@ Go implementation of traceroute.
 go get github.com/pixelbender/go-traceroute/...
 ```
 
-## Example
+## Simple tracing
+
+```go
+package main
+
+import (
+	"github.com/pixelbender/go-traceroute/traceroute"
+	"context"
+	"log"
+	"net"
+	"time"
+	"fmt"
+)
+
+func main() {
+    hops, err := traceroute.Trace(net.ParseIP("8.8.8.8"))
+    if err != nil {
+        log.Fatal(err)
+    }
+    for _, h := range hops {
+        for _, n := range h.Nodes {
+            log.Printf("%d. %v %v", h.Distance, n.IP, n.RTT)
+        }
+    }
+}
+```
+
+## Custom configuration
 
 ```go
 package main
