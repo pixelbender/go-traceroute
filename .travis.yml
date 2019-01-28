@@ -1,6 +1,5 @@
 language: go
-sudo: true
 go:
   - tip
 script:
-  - sudo go test -v ./...
+  - sudo -E go test -v ./...
