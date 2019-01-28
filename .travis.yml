@@ -1,5 +1,3 @@
 language: go
-go:
-  - tip
-script:
-  - sudo -E go test -v ./...
+go: tip
+script: sudo -E env "PATH=$PATH" go test ./...
