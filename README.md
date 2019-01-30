@@ -63,7 +63,7 @@ func main() {
             Timeout: time.Second,
             MaxHops: 30,
             Count:   3,
-            Network: "ip4:ip",
+            Networks: []string{"ip4:icmp", "ip4:ip"},
         },
     }
     defer t.Close()
