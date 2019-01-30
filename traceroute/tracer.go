@@ -127,6 +127,7 @@ func (t *Tracer) init() {
 			continue
 		}
 		go t.serve(t.conn)
+		return
 	}
 }
 
