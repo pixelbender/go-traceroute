@@ -3,7 +3,6 @@ package traceroute_test
 import (
 	"context"
 	"github.com/pixelbender/go-traceroute/traceroute"
-	"log"
 	"net"
 	"testing"
 	"time"
@@ -32,33 +31,36 @@ func TestTrace(t *testing.T) {
 	}
 }
 
-func ExampleSimple() {
-	hops, err := traceroute.Trace(net.ParseIP("1.1.1.1"))
-	if err != nil {
-		log.Fatal(err)
+func TestConcurrent(t *testing.T) {
+	hosts := []string{
+		"1.1.1.1",
+		"8.8.8.8",
 	}
-	for _, h := range hops {
-		for _, n := range h.Nodes {
-			log.Printf("%d. %v %v", h.Distance, n.IP, n.RTT)
+	ch := make(chan []*traceroute.Hop, len(hosts))
+	for _, h := range hosts {
+		go func(host string) {
+			ip := net.ParseIP(host)
+			hops, err := traceroute.Trace(ip)
+			if err != nil {
+				t.Log(err)
+			}
+			ch <- hops
+		}(h)
+	}
+	done := 0
+	for {
+		select {
+		case hops := <-ch:
+			for _, h := range hops {
+				for _, n := range h.Nodes {
+					t.Logf("%d. %v %v", h.Distance, n.IP, n.RTT)
+				}
+			}
+			if done++; done == len(hosts) {
+				return
+			}
+		case <-time.After(10 * time.Second):
+			t.Fatal("timeout")
 		}
-	}
-}
-
-func ExampleCustom() {
-	t := &traceroute.Tracer{
-		Config: traceroute.Config{
-			Delay:   50 * time.Millisecond,
-			Timeout: time.Second,
-			MaxHops: 30,
-			Count:   3,
-			Network: "ip4:ip",
-		},
-	}
-	defer t.Close()
-	err := t.Trace(context.Background(), net.ParseIP("1.1.1.1"), func(reply *traceroute.Reply) {
-		log.Printf("%d. %v %v", reply.Hops, reply.IP, reply.RTT)
-	})
-	if err != nil {
-		log.Fatal(err)
 	}
 }

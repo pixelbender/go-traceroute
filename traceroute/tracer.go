@@ -16,11 +16,11 @@ import (
 
 // DefaultConfig is the default configuration for Tracer.
 var DefaultConfig = Config{
-	Delay:   50 * time.Millisecond,
-	Timeout: 2 * time.Second,
-	MaxHops: 30,
-	Count:   3,
-	Network: "ip4:icmp",
+	Delay:    50 * time.Millisecond,
+	Timeout:  2 * time.Second,
+	MaxHops:  30,
+	Count:    3,
+	Networks: []string{"ip4:icmp", "ip4:ip"},
 }
 
 // DefaultTracer is a tracer with DefaultConfig.
@@ -30,12 +30,12 @@ var DefaultTracer = &Tracer{
 
 // Config is a configuration for Tracer.
 type Config struct {
-	Delay   time.Duration
-	Timeout time.Duration
-	MaxHops int
-	Count   int
-	Network string
-	Addr    *net.IPAddr
+	Delay    time.Duration
+	Timeout  time.Duration
+	MaxHops  int
+	Count    int
+	Networks []string
+	Addr     *net.IPAddr
 }
 
 // Tracer is a traceroute tool based on raw IP packets.
@@ -69,6 +69,7 @@ func (t *Tracer) Trace(ctx context.Context, ip net.IP, h func(reply *Reply)) err
 		if !ok {
 			return false
 		}
+		delete(m, res.ID)
 		hops := req.TTL - res.TTL + 1
 		if hops < 1 {
 			hops = 1
@@ -120,11 +121,13 @@ func (t *Tracer) Trace(ctx context.Context, ip net.IP, h func(reply *Reply)) err
 }
 
 func (t *Tracer) init() {
-	t.conn, t.err = t.listen(t.Network, t.Addr)
-	if t.err != nil {
-		return
+	for _, network := range t.Networks {
+		t.conn, t.err = t.listen(network, t.Addr)
+		if t.err != nil {
+			continue
+		}
+		go t.serve(t.conn)
 	}
-	go t.serve(t.conn)
 }
 
 func (t *Tracer) listen(network string, laddr *net.IPAddr) (*net.IPConn, error) {
