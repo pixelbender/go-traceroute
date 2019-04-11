@@ -21,7 +21,7 @@ func TestTraceReply(t *testing.T) {
 func TestPing(t *testing.T) {
 	ip := net.ParseIP("1.1.1.1")
 	err := traceroute.DefaultTracer.Ping(context.Background(), ip, func(r *traceroute.Reply) {
-		t.Logf("%d. %v %v", r.Hops, r.IP, r.RTT)
+		t.Logf("%v %v", r.IP, r.RTT)
 	})
 	if err != nil {
 		t.Fatal(err)

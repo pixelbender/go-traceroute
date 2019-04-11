@@ -68,26 +68,17 @@ func (t *Tracer) Ping(ctx context.Context, ip net.IP, h func(reply *Reply)) erro
 	var probes []*packet
 
 	handle := func(res *packet) bool {
-		var req *packet
-		for i, r := range probes {
-			if r.ID == res.ID {
-				req = r
+		for i, req := range probes {
+			if req.ID == res.ID {
 				probes = append(probes[:i], probes[i+1:]...)
-				break
+				h(&Reply{
+					IP:  res.IP,
+					RTT: res.Time.Sub(req.Time),
+				})
+				return true
 			}
 		}
-		if req == nil {
-			return false
-		}
-		hops := req.TTL - res.TTL + 1
-		if hops < 1 {
-			hops = 1
-		}
-		h(&Reply{
-			IP:  res.IP,
-			RTT: res.Time.Sub(req.Time),
-		})
-		return true
+		return false
 	}
 
 	delay := time.NewTicker(t.Delay)
