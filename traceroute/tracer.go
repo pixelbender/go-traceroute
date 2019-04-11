@@ -67,6 +67,8 @@ func (t *Tracer) Trace(ctx context.Context, ip net.IP, h func(reply *Reply)) err
 	defer t.removeListener(ip, ch)
 
 	var probes []*packet
+	min, max := 0, t.MaxHops
+
 	handle := func(res *packet) bool {
 		var req *packet
 		for i, r := range probes {
@@ -88,12 +90,32 @@ func (t *Tracer) Trace(ctx context.Context, ip net.IP, h func(reply *Reply)) err
 			RTT:  res.Time.Sub(req.Time),
 			Hops: hops,
 		})
+		if ip.Equal(res.IP) {
+			if max > hops {
+				max = hops
+			}
+			if min == 0 || min > hops {
+				min = hops
+			}
+		}
+		return true
+	}
+
+	done := func() bool {
+		if min == 0 {
+			return false
+		}
+		for _, r := range probes {
+			if r.TTL <= min {
+				return false
+			}
+		}
 		return true
 	}
 
 	delay := time.NewTicker(t.Delay)
 	for n := 0; n < t.Count; n++ {
-		max := t.MaxHops
+		max = t.MaxHops
 		for ttl := 1; ttl < max; ttl++ {
 			req, err := t.sendRequest(ip, ttl)
 			if err != nil {
@@ -107,9 +129,6 @@ func (t *Tracer) Trace(ctx context.Context, ip net.IP, h func(reply *Reply)) err
 					break wait
 				case r := <-ch:
 					if handle(r) {
-						if max > r.TTL && ip.Equal(r.IP) {
-							max = r.TTL
-						}
 						break wait
 					}
 				case <-ctx.Done():
@@ -118,14 +137,14 @@ func (t *Tracer) Trace(ctx context.Context, ip net.IP, h func(reply *Reply)) err
 			}
 		}
 	}
-	if len(probes) == 0 {
+	if done() {
 		return nil
 	}
 	deadline := time.After(t.Timeout)
 	for {
 		select {
 		case r := <-ch:
-			if handle(r) && len(probes) == 0 {
+			if handle(r) && done() {
 				return nil
 			}
 		case <-deadline:

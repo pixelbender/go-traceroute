@@ -47,6 +47,7 @@ func TestConcurrent(t *testing.T) {
 			ch <- hops
 		}(h)
 	}
+
 	done := 0
 	for {
 		select {
