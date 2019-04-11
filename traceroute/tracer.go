@@ -52,6 +52,83 @@ type Tracer struct {
 	seq       uint32
 }
 
+// Ping starts sending ICMP Echo Requests with TTL = MaxHops and calls h for each reply.
+func (t *Tracer) Ping(ctx context.Context, ip net.IP, h func(reply *Reply)) error {
+	t.once.Do(t.init)
+	if t.err != nil {
+		return t.err
+	}
+
+	ip = shortIP(ip)
+	ch := make(chan *packet, 64)
+
+	t.addListener(ip, ch)
+	defer t.removeListener(ip, ch)
+
+	var probes []*packet
+
+	handle := func(res *packet) bool {
+		var req *packet
+		for i, r := range probes {
+			if r.ID == res.ID {
+				req = r
+				probes = append(probes[:i], probes[i+1:]...)
+				break
+			}
+		}
+		if req == nil {
+			return false
+		}
+		hops := req.TTL - res.TTL + 1
+		if hops < 1 {
+			hops = 1
+		}
+		h(&Reply{
+			IP:  res.IP,
+			RTT: res.Time.Sub(req.Time),
+		})
+		return true
+	}
+
+	delay := time.NewTicker(t.Delay)
+	for n := 0; n < t.Count; n++ {
+		req, err := t.sendRequest(ip, t.MaxHops)
+		if err != nil {
+			return err
+		}
+		probes = append(probes, req)
+	wait:
+		for {
+			select {
+			case <-delay.C:
+				break wait
+			case r := <-ch:
+				if handle(r) {
+					break wait
+				}
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+	}
+	if len(probes) == 0 {
+		return nil
+	}
+	deadline := time.After(t.Timeout)
+	for {
+		select {
+		case r := <-ch:
+			if handle(r) && len(probes) == 0 {
+				return nil
+			}
+		case <-deadline:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+}
+
 // Trace starts sending IP packets to ip with TTL = 1, 2, ..., MaxHops and calls h for each reply.
 // It can be called concurrently.
 func (t *Tracer) Trace(ctx context.Context, ip net.IP, h func(reply *Reply)) error {

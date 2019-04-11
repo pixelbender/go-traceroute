@@ -10,8 +10,18 @@ import (
 
 func TestTraceReply(t *testing.T) {
 	ip := net.ParseIP("1.1.1.1")
-	err := traceroute.DefaultTracer.Trace(context.Background(), ip, func(reply *traceroute.Reply) {
-		t.Logf("%d. %v %v", reply.Hops, reply.IP, reply.RTT)
+	err := traceroute.DefaultTracer.Trace(context.Background(), ip, func(r *traceroute.Reply) {
+		t.Logf("%d. %v %v", r.Hops, r.IP, r.RTT)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPing(t *testing.T) {
+	ip := net.ParseIP("1.1.1.1")
+	err := traceroute.DefaultTracer.Ping(context.Background(), ip, func(r *traceroute.Reply) {
+		t.Logf("%d. %v %v", r.Hops, r.IP, r.RTT)
 	})
 	if err != nil {
 		t.Fatal(err)
