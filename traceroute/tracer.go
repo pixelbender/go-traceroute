@@ -47,9 +47,9 @@ type Tracer struct {
 	conn *net.IPConn
 	err  error
 
-	mu   sync.RWMutex
-	sess map[string][]*session
-	seq  uint32
+	mu        sync.RWMutex
+	listeners map[string][]chan *packet
+	seq       uint32
 }
 
 // Trace starts sending IP packets to ip with TTL = 1, 2, ..., MaxHops and calls h for each reply.
@@ -59,17 +59,26 @@ func (t *Tracer) Trace(ctx context.Context, ip net.IP, h func(reply *Reply)) err
 	if t.err != nil {
 		return t.err
 	}
-	sess := newSession(t, ip)
-	defer sess.Close()
 
-	delay := time.NewTicker(t.Delay)
-	m := make(map[uint16]*packet)
+	ip = shortIP(ip)
+	ch := make(chan *packet, 64)
+
+	t.addListener(ip, ch)
+	defer t.removeListener(ip, ch)
+
+	var probes []*packet
 	handle := func(res *packet) bool {
-		req, ok := m[res.ID]
-		if !ok {
+		var req *packet
+		for i, r := range probes {
+			if r.ID == res.ID {
+				req = r
+				probes = append(probes[:i], probes[i+1:]...)
+				break
+			}
+		}
+		if req == nil {
 			return false
 		}
-		delete(m, res.ID)
 		hops := req.TTL - res.TTL + 1
 		if hops < 1 {
 			hops = 1
@@ -81,23 +90,25 @@ func (t *Tracer) Trace(ctx context.Context, ip net.IP, h func(reply *Reply)) err
 		})
 		return true
 	}
+
+	delay := time.NewTicker(t.Delay)
 	for n := 0; n < t.Count; n++ {
 		max := t.MaxHops
 		for ttl := 1; ttl < max; ttl++ {
-			req, err := sess.Probe(ttl)
+			req, err := t.sendRequest(ip, ttl)
 			if err != nil {
 				return err
 			}
-			m[req.ID] = req
+			probes = append(probes, req)
 		wait:
 			for {
 				select {
 				case <-delay.C:
 					break wait
-				case res := <-sess.C:
-					if handle(res) {
-						if max > req.TTL && ip.Equal(res.IP) {
-							max = req.TTL
+				case r := <-ch:
+					if handle(r) {
+						if max > r.TTL && ip.Equal(r.IP) {
+							max = r.TTL
 						}
 						break wait
 					}
@@ -107,11 +118,16 @@ func (t *Tracer) Trace(ctx context.Context, ip net.IP, h func(reply *Reply)) err
 			}
 		}
 	}
+	if len(probes) == 0 {
+		return nil
+	}
 	deadline := time.After(t.Timeout)
 	for {
 		select {
-		case res := <-sess.C:
-			handle(res)
+		case r := <-ch:
+			if handle(r) && len(probes) == 0 {
+				return nil
+			}
 		case <-deadline:
 			return nil
 		case <-ctx.Done():
@@ -214,10 +230,13 @@ func (t *Tracer) serveData(from net.IP, b []byte) error {
 
 func (t *Tracer) serveReply(dst net.IP, res *packet) error {
 	t.mu.RLock()
-	a := t.sess[string(shortIP(dst))]
+	a := t.listeners[string(shortIP(dst))]
 	t.mu.RUnlock()
-	for _, it := range a {
-		go it.Handle(res)
+	for _, ch := range a {
+		select {
+		case ch <- res:
+		default:
+		}
 	}
 	return nil
 }
@@ -233,22 +252,22 @@ func (t *Tracer) sendRequest(dst net.IP, ttl int) (*packet, error) {
 	return req, nil
 }
 
-func (t *Tracer) addSess(s *session) {
+func (t *Tracer) addListener(ip net.IP, ch chan *packet) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if t.sess == nil {
-		t.sess = make(map[string][]*session)
+	if t.listeners == nil {
+		t.listeners = make(map[string][]chan *packet)
 	}
-	t.sess[string(s.dst)] = append(t.sess[string(s.dst)], s)
+	t.listeners[string(ip)] = append(t.listeners[string(ip)], ch)
 }
 
-func (t *Tracer) removeSess(s *session) {
+func (t *Tracer) removeListener(ip net.IP, ch chan *packet) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	a := t.sess[string(s.dst)]
+	a := t.listeners[string(ip)]
 	for i, it := range a {
-		if it == s {
-			t.sess[string(s.dst)] = append(a[:i], a[i+1:]...)
+		if it == ch {
+			t.listeners[string(ip)] = append(a[:i], a[i+1:]...)
 			return
 		}
 	}
@@ -259,34 +278,6 @@ type packet struct {
 	ID   uint16
 	TTL  int
 	Time time.Time
-}
-
-type session struct {
-	*Tracer
-	dst net.IP
-	C   chan *packet
-}
-
-func newSession(t *Tracer, dst net.IP) *session {
-	s := &session{
-		t,
-		shortIP(dst),
-		make(chan *packet, 64),
-	}
-	t.addSess(s)
-	return s
-}
-
-func (s *session) Handle(res *packet) {
-	s.C <- res
-}
-
-func (s *session) Probe(ttl int) (*packet, error) {
-	return s.sendRequest(s.dst, ttl)
-}
-
-func (s *session) Close() {
-	s.removeSess(s)
 }
 
 func shortIP(ip net.IP) net.IP {
