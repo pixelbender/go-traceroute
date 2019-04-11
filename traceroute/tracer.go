@@ -312,8 +312,8 @@ func (t *Tracer) serveData(from net.IP, b []byte) error {
 
 func (t *Tracer) serveReply(dst net.IP, res *packet) error {
 	t.mu.RLock()
+	defer t.mu.RUnlock()
 	a := t.listeners[string(shortIP(dst))]
-	t.mu.RUnlock()
 	for _, ch := range a {
 		select {
 		case ch <- res:
