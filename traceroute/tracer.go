@@ -3,15 +3,16 @@ package traceroute
 import (
 	"context"
 	"errors"
-	"golang.org/x/net/icmp"
-	"golang.org/x/net/ipv4"
-	"golang.org/x/net/ipv6"
 	"net"
 	"sort"
 	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
+
+	"golang.org/x/net/icmp"
+	"golang.org/x/net/ipv4"
+	"golang.org/x/net/ipv6"
 )
 
 // DefaultConfig is the default configuration for Tracer.
@@ -208,6 +209,74 @@ func (t *Tracer) Trace(ctx context.Context, ip net.IP, h func(reply *Reply)) err
 		select {
 		case r := <-ch:
 			if handle(r) && done() {
+				return nil
+			}
+		case <-deadline:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+}
+
+//StaticTrace starts sending IP packets to ip with static TTL to check the status of a specific node
+func (t *Tracer) StaticTrace(ctx context.Context, ip net.IP, ttl int, to time.Duration, h func(reply *Reply)) error {
+	t.once.Do(t.init)
+	if t.err != nil {
+		return t.err
+	}
+
+	ip = shortIP(ip)
+	ch := make(chan *packet, 64)
+
+	t.addListener(ip, ch)
+	defer t.removeListener(ip, ch)
+
+	var probes []*packet
+
+	handle := func(res *packet) bool {
+		for i, req := range probes {
+			if req.ID == res.ID {
+				probes = append(probes[:i], probes[i+1:]...)
+				h(&Reply{
+					IP:  res.IP,
+					RTT: res.Time.Sub(req.Time),
+				})
+				return true
+			}
+		}
+		return false
+	}
+
+	delay := time.NewTicker(t.Delay)
+	for n := 0; n < t.Count; n++ {
+		req, err := t.sendRequest(ip, ttl)
+		if err != nil {
+			return err
+		}
+		probes = append(probes, req)
+	wait:
+		for {
+			select {
+			case <-delay.C:
+				break wait
+			case r := <-ch:
+				if handle(r) {
+					break wait
+				}
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+	}
+	if len(probes) == 0 {
+		return nil
+	}
+	deadline := time.After(to)
+	for {
+		select {
+		case r := <-ch:
+			if handle(r) && len(probes) == 0 {
 				return nil
 			}
 		case <-deadline:
