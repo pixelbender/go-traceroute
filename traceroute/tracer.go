@@ -252,6 +252,8 @@ type Session struct {
 	t      *Tracer
 	ip     net.IP
 	ch     chan *Reply
+
+	mu sync.Mutex
 	probes []*packet
 }
 
@@ -276,7 +278,9 @@ func (s *Session) Ping(ttl int) error {
 	if err != nil {
 		return err
 	}
+	s.mu.Lock()
 	s.probes = append(s.probes, req)
+	s.mu.Unlock()
 	return nil
 }
 
@@ -299,6 +303,7 @@ func (s *Session) handle(res *packet) {
 	now := res.Time
 	n := 0
 	var req *packet
+	s.mu.Lock()
 	for _, r := range s.probes {
 		if now.Sub(r.Time) > s.t.Timeout {
 			continue
@@ -311,6 +316,7 @@ func (s *Session) handle(res *packet) {
 		n++
 	}
 	s.probes = s.probes[:n]
+	s.mu.Unlock()
 	if req == nil {
 		return
 	}
