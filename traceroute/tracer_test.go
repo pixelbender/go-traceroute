@@ -9,22 +9,33 @@ import (
 )
 
 func TestTraceReply(t *testing.T) {
-	ip := net.ParseIP("1.1.1.1")
-	err := traceroute.DefaultTracer.Trace(context.Background(), ip, func(r *traceroute.Reply) {
-		t.Logf("%d. %v %v", r.Hops, r.IP, r.RTT)
-	})
+	err := traceroute.DefaultTracer.Trace(
+		context.Background(),
+		net.ParseIP("1.1.1.1"),
+		func(r *traceroute.Reply) {
+			t.Logf("%d. %v %v", r.Hops, r.IP, r.RTT)
+		})
 	if err != nil {
 		t.Fatal(err)
 	}
 }
 
 func TestPing(t *testing.T) {
-	ip := net.ParseIP("1.1.1.1")
-	err := traceroute.DefaultTracer.Ping(context.Background(), ip, func(r *traceroute.Reply) {
-		t.Logf("%v %v", r.IP, r.RTT)
-	})
+	sess, err := traceroute.NewSession(net.ParseIP("1.1.1.1"))
 	if err != nil {
 		t.Fatal(err)
+	}
+	defer sess.Close()
+
+	err = sess.Ping(traceroute.DefaultConfig.MaxHops)
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case r := <-sess.Receive():
+		t.Logf("%v %v", r.IP, r.RTT)
+	case <-time.After(traceroute.DefaultConfig.Timeout):
+		t.Fatal("time out")
 	}
 }
 
@@ -66,28 +77,6 @@ func TestConcurrent(t *testing.T) {
 			}
 		case <-time.After(10 * time.Second):
 			t.Fatal("timeout")
-		}
-	}
-}
-
-func TestRepeat(t *testing.T) {
-	tracer := &traceroute.Tracer{
-		Config: traceroute.DefaultConfig,
-	}
-	tracer.Count = 1
-
-	ip := net.ParseIP("1.1.1.1")
-	count := 3
-
-	handle := func(r *traceroute.Reply) {
-		t.Log(r.Hops, r.IP, r.RTT)
-	}
-	ctx := context.Background()
-
-	for i := 0; i < count; i++ {
-		err := tracer.Trace(ctx, ip, handle)
-		if err != nil {
-			t.Fatal(err)
 		}
 	}
 }

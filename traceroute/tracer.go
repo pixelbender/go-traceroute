@@ -47,69 +47,53 @@ type Tracer struct {
 	conn *net.IPConn
 	err  error
 
-	mu        sync.RWMutex
-	listeners map[string][]chan *packet
-	seq       uint32
+	mu   sync.RWMutex
+	sess map[string][]*Session
+	seq  uint32
 }
 
-// Ping starts sending ICMP Echo Requests with TTL = MaxHops and calls h for each reply.
-func (t *Tracer) Ping(ctx context.Context, ip net.IP, h func(reply *Reply)) error {
-	t.once.Do(t.init)
-	if t.err != nil {
-		return t.err
+// Trace starts sending IP packets increasing TTL until MaxHops and calls h for each reply.
+func (t *Tracer) Trace(ctx context.Context, ip net.IP, h func(reply *Reply)) error {
+	sess, err := t.NewSession(ip)
+	if err != nil {
+		return err
 	}
-
-	ip = shortIP(ip)
-	ch := make(chan *packet, 64)
-
-	t.addListener(ip, ch)
-	defer t.removeListener(ip, ch)
-
-	var probes []*packet
-
-	handle := func(res *packet) bool {
-		for i, req := range probes {
-			if req.ID == res.ID {
-				probes = append(probes[:i], probes[i+1:]...)
-				h(&Reply{
-					IP:  res.IP,
-					RTT: res.Time.Sub(req.Time),
-				})
-				return true
-			}
-		}
-		return false
-	}
+	defer sess.Close()
 
 	delay := time.NewTicker(t.Delay)
+	defer delay.Stop()
+
+	max := t.MaxHops
 	for n := 0; n < t.Count; n++ {
-		req, err := t.sendRequest(ip, t.MaxHops)
-		if err != nil {
-			return err
-		}
-		probes = append(probes, req)
-	wait:
-		for {
+		for ttl := 1; ttl <= t.MaxHops && ttl <= max; ttl++ {
+			err = sess.Ping(ttl)
+			if err != nil {
+				return err
+			}
 			select {
 			case <-delay.C:
-				break wait
-			case r := <-ch:
-				if handle(r) {
-					break wait
+			case r := <-sess.Receive():
+				if max > r.Hops && ip.Equal(r.IP) {
+					max = r.Hops
 				}
+				h(r)
 			case <-ctx.Done():
 				return ctx.Err()
 			}
 		}
 	}
-	if len(probes) == 0 {
+	if sess.isDone(max) {
 		return nil
 	}
 	deadline := time.After(t.Timeout)
 	for {
 		select {
-		case r := <-ch:
-			if handle(r) && len(probes) == 0 {
+		case r := <-sess.Receive():
+			if max > r.Hops && ip.Equal(r.IP) {
+				max = r.Hops
+			}
+			h(r)
+			if sess.isDone(max) {
 				return nil
 			}
 		case <-deadline:
@@ -120,102 +104,13 @@ func (t *Tracer) Ping(ctx context.Context, ip net.IP, h func(reply *Reply)) erro
 	}
 }
 
-// Trace starts sending IP packets to ip with TTL = 1, 2, ..., MaxHops and calls h for each reply.
-// It can be called concurrently.
-func (t *Tracer) Trace(ctx context.Context, ip net.IP, h func(reply *Reply)) error {
+// NewSession returns new tracer session.
+func (t *Tracer) NewSession(ip net.IP) (*Session, error) {
 	t.once.Do(t.init)
 	if t.err != nil {
-		return t.err
+		return nil, t.err
 	}
-
-	ip = shortIP(ip)
-	ch := make(chan *packet, 64)
-
-	t.addListener(ip, ch)
-	defer t.removeListener(ip, ch)
-
-	var probes []*packet
-	max := t.MaxHops
-
-	handle := func(res *packet) bool {
-		var req *packet
-		for i, r := range probes {
-			if r.ID == res.ID {
-				req = r
-				probes = append(probes[:i], probes[i+1:]...)
-				break
-			}
-		}
-		if req == nil {
-			return false
-		}
-		hops := req.TTL - res.TTL + 1
-		if hops < 1 {
-			hops = 1
-		}
-		if ip.Equal(res.IP) {
-			if max > hops {
-				max = hops
-			} else if max < hops {
-				return false
-			}
-		}
-		h(&Reply{
-			IP:   res.IP,
-			RTT:  res.Time.Sub(req.Time),
-			Hops: hops,
-		})
-		return true
-	}
-
-	done := func() bool {
-		for _, r := range probes {
-			if r.TTL <= max {
-				return false
-			}
-		}
-		return true
-	}
-
-	delay := time.NewTicker(t.Delay)
-	for n := 0; n < t.Count; n++ {
-		for ttl := 0; ttl < t.MaxHops && ttl < max; ttl++ {
-			req, err := t.sendRequest(ip, ttl+1)
-			if err != nil {
-				return err
-			}
-			probes = append(probes, req)
-		wait:
-			for {
-				select {
-				case <-delay.C:
-					break wait
-				case r := <-ch:
-					if handle(r) {
-						break wait
-					}
-				case <-ctx.Done():
-					return ctx.Err()
-				}
-			}
-		}
-	}
-	if done() {
-		return nil
-	}
-	deadline := time.After(t.Timeout)
-	for {
-		select {
-		case r := <-ch:
-			if handle(r) && done() {
-				return nil
-			}
-		case <-deadline:
-			return nil
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-	}
+	return newSession(t, shortIP(ip)), nil
 }
 
 func (t *Tracer) init() {
@@ -310,19 +205,6 @@ func (t *Tracer) serveData(from net.IP, b []byte) error {
 	}
 }
 
-func (t *Tracer) serveReply(dst net.IP, res *packet) error {
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-	a := t.listeners[string(shortIP(dst))]
-	for _, ch := range a {
-		select {
-		case ch <- res:
-		default:
-		}
-	}
-	return nil
-}
-
 func (t *Tracer) sendRequest(dst net.IP, ttl int) (*packet, error) {
 	id := uint16(atomic.AddUint32(&t.seq, 1))
 	b := newPacket(id, dst, ttl)
@@ -334,25 +216,121 @@ func (t *Tracer) sendRequest(dst net.IP, ttl int) (*packet, error) {
 	return req, nil
 }
 
-func (t *Tracer) addListener(ip net.IP, ch chan *packet) {
+func (t *Tracer) addSession(s *Session) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if t.listeners == nil {
-		t.listeners = make(map[string][]chan *packet)
+	if t.sess == nil {
+		t.sess = make(map[string][]*Session)
 	}
-	t.listeners[string(ip)] = append(t.listeners[string(ip)], ch)
+	t.sess[string(s.ip)] = append(t.sess[string(s.ip)], s)
 }
 
-func (t *Tracer) removeListener(ip net.IP, ch chan *packet) {
+func (t *Tracer) removeSession(s *Session) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	a := t.listeners[string(ip)]
+	a := t.sess[string(s.ip)]
 	for i, it := range a {
-		if it == ch {
-			t.listeners[string(ip)] = append(a[:i], a[i+1:]...)
+		if it == s {
+			t.sess[string(s.ip)] = append(a[:i], a[i+1:]...)
 			return
 		}
 	}
+}
+
+func (t *Tracer) serveReply(dst net.IP, res *packet) error {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	a := t.sess[string(shortIP(dst))]
+	for _, s := range a {
+		s.handle(res)
+	}
+	return nil
+}
+
+// Session is a tracer session.
+type Session struct {
+	t      *Tracer
+	ip     net.IP
+	ch     chan *Reply
+	probes []*packet
+}
+
+// NewSession returns new session.
+func NewSession(ip net.IP) (*Session, error) {
+	return DefaultTracer.NewSession(ip)
+}
+
+func newSession(t *Tracer, ip net.IP) *Session {
+	s := &Session{
+		t:  t,
+		ip: ip,
+		ch: make(chan *Reply, 64),
+	}
+	t.addSession(s)
+	return s
+}
+
+// Ping sends single ICMP packet with specified TTL.
+func (s *Session) Ping(ttl int) error {
+	req, err := s.t.sendRequest(s.ip, ttl+1)
+	if err != nil {
+		return err
+	}
+	s.probes = append(s.probes, req)
+	return nil
+}
+
+// Receive returns channel to receive ICMP replies.
+func (s *Session) Receive() <-chan *Reply {
+	return s.ch
+}
+
+// isDone returns true if session does not have unresponsed requests with TTL <= ttl.
+func (s *Session) isDone(ttl int) bool {
+	for _, r := range s.probes {
+		if r.TTL <= ttl {
+			return false
+		}
+	}
+	return true
+}
+
+func (s *Session) handle(res *packet) {
+	now := res.Time
+	n := 0
+	var req *packet
+	for _, r := range s.probes {
+		if now.Sub(r.Time) > s.t.Timeout {
+			continue
+		}
+		if r.ID == res.ID {
+			req = r
+			continue
+		}
+		s.probes[n] = r
+		n++
+	}
+	s.probes = s.probes[:n]
+	if req == nil {
+		return
+	}
+	hops := req.TTL - res.TTL + 1
+	if hops < 1 {
+		hops = 1
+	}
+	select {
+	case s.ch <- &Reply{
+		IP:   res.IP,
+		RTT:  res.Time.Sub(req.Time),
+		Hops: hops,
+	}:
+	default:
+	}
+}
+
+// Close closes tracer session.
+func (s *Session) Close() {
+	s.t.removeSession(s)
 }
 
 type packet struct {
