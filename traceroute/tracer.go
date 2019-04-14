@@ -253,7 +253,7 @@ type Session struct {
 	ip     net.IP
 	ch     chan *Reply
 
-	mu sync.Mutex
+	mu sync.RWMutex
 	probes []*packet
 }
 
@@ -291,6 +291,8 @@ func (s *Session) Receive() <-chan *Reply {
 
 // isDone returns true if session does not have unresponsed requests with TTL <= ttl.
 func (s *Session) isDone(ttl int) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	for _, r := range s.probes {
 		if r.TTL <= ttl {
 			return false
