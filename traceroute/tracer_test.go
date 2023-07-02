@@ -50,6 +50,7 @@ func TestTrace(t *testing.T) {
 			t.Logf("%d. %v %v", h.Distance, n.IP, n.RTT)
 		}
 	}
+	t.Fail()
 }
 
 func TestConcurrent(t *testing.T) {
